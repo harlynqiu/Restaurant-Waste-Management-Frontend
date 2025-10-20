@@ -5,6 +5,7 @@ import 'trash_pickup_list_screen.dart';
 import 'rewards_dashboard_screen.dart';
 import 'rewards_history_screen.dart';
 import 'employee_list_screen.dart';
+import 'pickup_map_screen.dart'; // ✅ NEW IMPORT
 import 'login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -47,7 +48,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _fetchUserInfo() async {
-    // Try loading from SharedPreferences first
     final prefs = await SharedPreferences.getInstance();
     final storedRestaurant = prefs.getString("restaurant_name");
     final storedUsername = prefs.getString("username");
@@ -60,7 +60,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
-    // Fallback: fetch from API
     final user = await ApiService.getCurrentUser();
     if (!mounted) return;
     setState(() {
@@ -115,9 +114,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        _restaurantName.isEmpty
-                            ? "Welcome..."
-                            : "Welcome, $_restaurantName!",
+                        _restaurantName.isNotEmpty
+                            ? "Welcome, $_restaurantName!"
+                            : "Welcome, $_username!",
                         style: const TextStyle(
                           fontSize: 25,
                           fontWeight: FontWeight.w600,
@@ -243,6 +242,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       );
                     },
                   ),
+                  // ✅ NEW MAP CARD
+                  _buildDashboardCard(
+                    icon: Icons.map_outlined,
+                    title: "Pickup Map",
+                    subtitle: "View pickup locations",
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PickupMapScreen(),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
 
@@ -356,6 +369,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () {
               setState(() => _selectedIndex = 3);
               Navigator.pop(context);
+            },
+          ),
+          // ✅ ADD MAP LINK
+          ListTile(
+            leading: const Icon(Icons.map_outlined),
+            title: const Text('Pickup Map'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PickupMapScreen()),
+              );
             },
           ),
           const Divider(),

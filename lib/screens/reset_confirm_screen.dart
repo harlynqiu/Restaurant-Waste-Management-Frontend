@@ -7,7 +7,11 @@ class ResetConfirmScreen extends StatefulWidget {
   final String uid;
   final String token;
 
-  const ResetConfirmScreen({super.key, required this.uid, required this.token});
+  const ResetConfirmScreen({
+    super.key,
+    required this.uid,
+    required this.token,
+  });
 
   @override
   State<ResetConfirmScreen> createState() => _ResetConfirmScreenState();
@@ -16,8 +20,16 @@ class ResetConfirmScreen extends StatefulWidget {
 class _ResetConfirmScreenState extends State<ResetConfirmScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _loading = false;
+  bool _obscureText = true;
 
   void _confirmReset() async {
+    if (_passwordController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter your new password.")),
+      );
+      return;
+    }
+
     setState(() => _loading = true);
 
     final success = await ApiService.confirmResetPassword(
@@ -30,7 +42,9 @@ class _ResetConfirmScreenState extends State<ResetConfirmScreen> {
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Password reset successful! Please login.")),
+        const SnackBar(
+          content: Text("Password reset successful! Please login."),
+        ),
       );
       Navigator.pushReplacement(
         context,
@@ -61,13 +75,21 @@ class _ResetConfirmScreenState extends State<ResetConfirmScreen> {
             ),
             const SizedBox(height: 24),
 
-            // New password field
+            // Password field
             TextField(
               controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
+              obscureText: _obscureText,
+              decoration: InputDecoration(
                 labelText: "New Password",
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureText ? Icons.visibility_off : Icons.visibility,
+                  ),
+                  onPressed: () {
+                    setState(() => _obscureText = !_obscureText);
+                  },
+                ),
               ),
             ),
             const SizedBox(height: 24),

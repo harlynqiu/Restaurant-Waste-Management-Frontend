@@ -1,10 +1,9 @@
 // lib/screens/driver_dashboard.dart
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/api_service.dart';
 import 'assigned_pickups_screen.dart';
-import 'profile_screen.dart';
 import 'login_screen.dart';
-import 'available_pickups_screen.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({super.key});
@@ -17,13 +16,58 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   int _activePickups = 0;
   int _completedPickups = 0;
   bool _loading = true;
+  Stream<Position>? _positionStream;
 
   @override
   void initState() {
     super.initState();
     _fetchDriverStats();
+    _startLiveTracking();
   }
 
+  @override
+  void dispose() {
+    _positionStream?.drain();
+    super.dispose();
+  }
+
+  // ---------------- GPS LIVE TRACKING ----------------
+  Future<void> _startLiveTracking() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        await Geolocator.openLocationSettings();
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Location permission denied")),
+        );
+        return;
+      }
+
+      _positionStream = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 5,
+        ),
+      );
+
+      _positionStream!.listen((Position position) async {
+        await ApiService.updateDriverLocation(
+          position.latitude,
+          position.longitude,
+        );
+      });
+    } catch (e) {
+      debugPrint("GPS tracking error: $e");
+    }
+  }
+
+  // ---------------- FETCH PICKUP STATS ----------------
   Future<void> _fetchDriverStats() async {
     setState(() => _loading = true);
     try {
@@ -42,6 +86,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     setState(() => _loading = false);
   }
 
+  // ---------------- LOGOUT ----------------
   void _onLogout() async {
     final success = await ApiService.logout();
     if (!mounted) return;
@@ -58,43 +103,55 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     }
   }
 
-  Widget _buildDashboardCard({
+  // ---------------- CARD WIDGET ----------------
+  Widget _buildStatCard({
     required IconData icon,
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    Color? startColor,
+    Color? endColor,
   }) {
-    return InkWell(
+    return GestureDetector(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Card(
-        elevation: 3,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [startColor ?? Colors.green, endColor ?? Colors.teal],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 6,
+              offset: const Offset(2, 3),
+            ),
+          ],
         ),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircleAvatar(
-                radius: 30,
-                backgroundColor: Colors.green.withOpacity(0.1),
-                child: Icon(icon, size: 32, color: Colors.green),
-              ),
+              Icon(icon, color: Colors.white, size: 38),
               const SizedBox(height: 16),
               Text(
                 title,
                 style: const TextStyle(
+                  color: Colors.white,
                   fontWeight: FontWeight.bold,
-                  fontSize: 16,
+                  fontSize: 18,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 subtitle,
-                style: const TextStyle(color: Colors.black54, fontSize: 13),
-                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
               ),
             ],
           ),
@@ -103,55 +160,88 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
   }
 
+  // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.grey[50],
       body: RefreshIndicator(
         onRefresh: _fetchDriverStats,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Welcome + Logout row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
+            children: [
+              // -------- HEADER --------
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(vertical: 50, horizontal: 24),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF004D40), Color(0xFF00796B)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(30),
+                    bottomRight: Radius.circular(30),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "Welcome, Driver",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "Driver Dashboard",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.logout,
+                              color: Colors.white, size: 28),
+                          tooltip: "Logout",
+                          onPressed: _onLogout,
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.red),
-                      tooltip: "Logout",
-                      onPressed: _onLogout,
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Stay on track and manage your pickups",
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 32),
+              ),
 
-                // Dashboard grid
-                GridView.count(
+              const SizedBox(height: 30),
+
+              // -------- DASHBOARD STATS --------
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
+                  mainAxisSpacing: 20,
+                  crossAxisSpacing: 20,
                   childAspectRatio: 1,
                   children: [
-                    _buildDashboardCard(
-                      icon: Icons.local_shipping,
-                      title: "Active Pickups",
-                      subtitle: _loading
-                          ? "Loading..."
-                          : "$_activePickups ongoing",
+                    _buildStatCard(
+                      icon: Icons.local_shipping_outlined,
+                      title: "Current Pickups",
+                      subtitle:
+                          _loading ? "Loading..." : "$_activePickups ongoing",
+                      startColor: Colors.green.shade700,
+                      endColor: Colors.teal.shade600,
                       onTap: () async {
                         final updated = await Navigator.push(
                           context,
@@ -160,17 +250,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                 const AssignedPickupsScreen(includeHistory: false),
                           ),
                         );
-                        if (updated == true) {
-                          _fetchDriverStats(); // ✅ refresh stats
-                        }
+                        if (updated == true) _fetchDriverStats();
                       },
                     ),
-                    _buildDashboardCard(
-                      icon: Icons.check_circle,
-                      title: "Completed Pickups",
-                      subtitle: _loading
-                          ? "Loading..."
-                          : "$_completedPickups done",
+                    _buildStatCard(
+                      icon: Icons.history_rounded,
+                      title: "Past Transactions",
+                      subtitle:
+                          _loading ? "Loading..." : "$_completedPickups completed",
+                      startColor: Colors.indigo.shade700,
+                      endColor: Colors.blue.shade600,
                       onTap: () async {
                         final updated = await Navigator.push(
                           context,
@@ -179,53 +268,26 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                 const AssignedPickupsScreen(includeHistory: true),
                           ),
                         );
-                        if (updated == true) {
-                          _fetchDriverStats(); // ✅ refresh stats
-                        }
-                      },
-                    ),
-                    _buildDashboardCard(
-                      icon: Icons.list_alt,
-                      title: "Available Pickups",
-                      subtitle: "Claim new requests",
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const AvailablePickupsScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    _buildDashboardCard(
-                      icon: Icons.person,
-                      title: "Profile",
-                      subtitle: "Update your info",
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                        );
+                        if (updated == true) _fetchDriverStats();
                       },
                     ),
                   ],
                 ),
+              ),
 
-                const SizedBox(height: 40),
+              const SizedBox(height: 60),
 
-                // Footer brand
-                const Center(
-                  child: Text(
-                    "🦅 DARWCOS DRIVER",
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
+              // -------- FOOTER --------
+              const Text(
+                "🛻 DRIVER MODE ACTIVE",
+                style: TextStyle(
+                  color: Colors.teal,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 40),
+            ],
           ),
         ),
       ),

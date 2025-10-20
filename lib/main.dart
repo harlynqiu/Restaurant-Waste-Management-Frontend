@@ -94,7 +94,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await ApiService.logout();
     if (mounted) {
       Navigator.pushAndRemoveUntil(
-        context,
+        context,      
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (route) => false,
       );

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 
+// TRANSACTION HISTORY
+
 class RewardsHistoryScreen extends StatefulWidget {
   const RewardsHistoryScreen({super.key});
 
@@ -10,6 +12,7 @@ class RewardsHistoryScreen extends StatefulWidget {
 }
 
 class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
+  static const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
   int? _points;
   bool _loading = true;
   List<dynamic> _transactions = [];
@@ -42,7 +45,7 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
     if (rawDate == null || rawDate.isEmpty) return "";
     try {
       final dt = DateTime.parse(rawDate);
-      return DateFormat("yyyy-MM-dd hh:mm a").format(dt);
+      return DateFormat("MMM dd, yyyy • hh:mm a").format(dt);
     } catch (_) {
       return rawDate;
     }
@@ -50,12 +53,17 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
 
   Color _statusColor(String status, int pts) {
     if (status == "cancelled") return Colors.grey;
-    return pts > 0 ? Colors.green : Colors.red;
+    return pts > 0 ? darwcosGreen : Colors.redAccent;
   }
 
   String _statusLabel(String status, int pts) {
     if (status == "cancelled") return "Cancelled";
     return pts > 0 ? "Earned" : "Redeemed";
+  }
+
+  IconData _statusIcon(String status, int pts) {
+    if (status == "cancelled") return Icons.remove_circle_outline;
+    return pts > 0 ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded;
   }
 
   @override
@@ -69,33 +77,73 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text("Transaction History"),
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.white,
+        elevation: 1,
+        title: const Text(
+          "Transaction History",
+          style: TextStyle(
+            color: darwcosGreen,
+            fontWeight: FontWeight.bold,
+            fontSize: 22,
+          ),
+        ),
+        iconTheme: const IconThemeData(color: darwcosGreen),
       ),
       body: RefreshIndicator(
         onRefresh: _fetchRewards,
         child: Column(
           children: [
-            // Total points badge
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-              decoration: BoxDecoration(
-                color: Colors.green,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                "Total Points: ${_points ?? 0}",
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+            const SizedBox(height: 20),
+
+            // 🟢 Header Card
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Card(
+                elevation: 5,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Total Points",
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: darwcosGreen,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "${_points ?? 0} pts",
+                            style: const TextStyle(
+                              fontSize: 36,
+                              fontWeight: FontWeight.bold,
+                              color: darwcosGreen,
+                            ),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh, color: darwcosGreen),
+                        onPressed: _fetchRewards,
+                        tooltip: "Refresh",
+                      ),
+                    ],
+                  ),
                 ),
-                textAlign: TextAlign.center,
               ),
             ),
 
+            const SizedBox(height: 10),
+
+            // 📜 Transactions List
             Expanded(
               child: _transactions.isEmpty
                   ? const Center(
@@ -109,6 +157,8 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
                     )
                   : ListView.builder(
                       physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 10),
                       itemCount: _transactions.length,
                       itemBuilder: (context, index) {
                         final tx = _transactions[index];
@@ -119,33 +169,60 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
 
                         final color = _statusColor(status, pts);
                         final label = _statusLabel(status, pts);
+                        final icon = _statusIcon(status, pts);
 
                         return Card(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
                           elevation: 3,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),
+                          margin: const EdgeInsets.only(bottom: 12),
                           child: Padding(
                             padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Row(
                               children: [
-                                // Top row: description + points
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
+                                // 🟢 Icon
+                                Container(
+                                  height: 50,
+                                  width: 50,
+                                  decoration: BoxDecoration(
+                                    color: color.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(icon, color: color, size: 28),
+                                ),
+                                const SizedBox(width: 16),
+
+                                // 🧾 Info
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
                                         desc,
                                         style: const TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
                                         ),
                                       ),
-                                    ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "📅 $createdAt",
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // 🔢 Points + Status
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
                                     Text(
                                       "${pts > 0 ? '+' : ''}$pts pts",
                                       style: TextStyle(
@@ -154,26 +231,10 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
                                         fontSize: 16,
                                       ),
                                     ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 8),
-
-                                // Date + status badge
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      "📅 $createdAt",
-                                      style: const TextStyle(
-                                        color: Colors.black54,
-                                        fontSize: 13,
-                                      ),
-                                    ),
+                                    const SizedBox(height: 6),
                                     Container(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 6),
+                                          horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
                                         color: color.withOpacity(0.1),
                                         borderRadius: BorderRadius.circular(20),
@@ -181,9 +242,9 @@ class _RewardsHistoryScreenState extends State<RewardsHistoryScreen> {
                                       child: Text(
                                         label,
                                         style: TextStyle(
-                                          fontWeight: FontWeight.bold,
                                           color: color,
                                           fontSize: 12,
+                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
                                     ),
