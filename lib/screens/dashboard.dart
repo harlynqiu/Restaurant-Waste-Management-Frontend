@@ -1,13 +1,10 @@
-// lib/screens/dashboard.dart
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'trash_pickup_list_screen.dart';
 import 'rewards_dashboard_screen.dart';
-import 'rewards_history_screen.dart';
 import 'employee_list_screen.dart';
-import 'pickup_map_screen.dart'; // ✅ NEW IMPORT
+import 'my_subscription_screen.dart';
 import 'login_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -17,13 +14,16 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   int _points = 0;
-  bool _loadingPoints = true;
+  bool _loading = true;
   String _username = "";
   String _restaurantName = "";
   int _selectedIndex = 0;
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   final TextEditingController _searchController = TextEditingController();
+  static const Color darwcosGreen = Color(0xFF015704);
 
   @override
   void initState() {
@@ -33,104 +33,137 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _fetchDashboardData() async {
     await Future.wait([
-      _fetchPoints(),
       _fetchUserInfo(),
+      _fetchPoints(),
     ]);
+    setState(() => _loading = false);
+  }
+
+  Future<void> _fetchUserInfo() async {
+    final user = await ApiService.getCurrentUser();
+    if (!mounted) return;
+    setState(() {
+      _username = user?["username"] ?? "";
+      _restaurantName = user?["restaurant_name"] ?? "Restaurant";
+    });
   }
 
   Future<void> _fetchPoints() async {
     final pts = await ApiService.getUserPoints();
     if (!mounted) return;
-    setState(() {
-      _points = pts;
-      _loadingPoints = false;
-    });
+    setState(() => _points = pts);
   }
 
-  Future<void> _fetchUserInfo() async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedRestaurant = prefs.getString("restaurant_name");
-    final storedUsername = prefs.getString("username");
-
-    if (storedRestaurant != null) {
-      setState(() {
-        _restaurantName = storedRestaurant;
-        _username = storedUsername ?? "User";
-      });
-      return;
-    }
-
-    final user = await ApiService.getCurrentUser();
+  Future<void> _logout() async {
+    await ApiService.logout();
     if (!mounted) return;
-    setState(() {
-      _username = user?["username"] ?? "User";
-      _restaurantName = user?["restaurant_name"] ?? "Your Restaurant";
-    });
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
-  void _onLogout() async {
-    final success = await ApiService.logout();
-    if (!mounted) return;
-    if (success) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Logout failed. Try again.")),
-      );
-    }
+  // ---------------- CARD BUILDER ----------------
+  Widget _buildDashboardCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                radius: 25,
+                backgroundColor: darwcosGreen.withOpacity(0.1),
+                child: Icon(icon, size: 28, color: darwcosGreen),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
-  // ---------- Dashboard View ----------
+  // ---------------- MAIN DASHBOARD VIEW ----------------
   Widget _buildDashboardView() {
-    const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
-
     return RefreshIndicator(
       onRefresh: _fetchDashboardData,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top Row: Logo + Restaurant (left), Search (center), Points (right)
+              // 🦅 Header Row
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // 🦅 Logo + Restaurant Name
                   Row(
                     children: [
                       GestureDetector(
                         onTap: () => _scaffoldKey.currentState?.openDrawer(),
                         child: Image.asset(
                           "assets/images/black_philippine_eagle.png",
-                          height: 60,
+                          height: 55,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _restaurantName.isNotEmpty
-                            ? "Welcome, $_restaurantName!"
-                            : "Welcome, $_username!",
-                        style: const TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w600,
-                          color: darwcosGreen,
-                        ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _restaurantName,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: darwcosGreen,
+                            ),
+                          ),
+                          Text(
+                            _loading ? "Loading points..." : "$_points points",
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-
-                  // 🔍 Centered Search Bar
+                  // 🔍 Search bar
                   Expanded(
                     child: Center(
                       child: SizedBox(
-                        width: 450,
+                        width: 400,
                         child: TextField(
                           controller: _searchController,
                           decoration: InputDecoration(
@@ -139,131 +172,177 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 const Icon(Icons.search, color: Colors.grey),
                             filled: true,
                             fillColor: Colors.white,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 0),
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 0),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(30),
                               borderSide: BorderSide.none,
                             ),
                           ),
-                          onSubmitted: (query) {
-                            if (query.isNotEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                    content:
-                                        Text("Searching for '$query'...")),
-                              );
-                            }
-                          },
                         ),
-                      ),
-                    ),
-                  ),
-
-                  // 💰 Points Badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: darwcosGreen,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _loadingPoints ? "..." : "$_points pts",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
 
-              // ✅ Dashboard Grid
+              // 🌿 Top Educational Banner (Ad-style)
+              Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color.fromARGB(255, 1, 87, 4),
+                      Color.fromARGB(255, 27, 125, 27),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.asset(
+                          "assets/images/black_philippine_eagle.png",
+                          height: 65,
+                          width: 65,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              "Radiate Pride. Radiate Cleanliness.",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              "Together, we make Davao City cleaner, greener, and prouder 🌱",
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: darwcosGreen,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                        ),
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  "Coming soon: Eco Awareness Tips 🌿"),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          "Learn More",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              // 📊 Dashboard Cards (smaller layout)
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1,
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: 0.95,
                 children: [
                   _buildDashboardCard(
-                    icon: Icons.schedule,
-                    title: "Schedule a Pick-Up",
-                    subtitle: "Book date & time",
+                    icon: Icons.delete_outline,
+                    title: "Trash Pickups",
+                    subtitle: "Manage waste pickups",
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const TrashPickupListScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  _buildDashboardCard(
-                    icon: Icons.receipt_long,
-                    title: "Past Transactions",
-                    subtitle: "Your history of points",
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const RewardsHistoryScreen(),
-                        ),
+                            builder: (_) => const TrashPickupListScreen()),
                       );
                     },
                   ),
                   _buildDashboardCard(
                     icon: Icons.card_giftcard,
                     title: "Rewards",
-                    subtitle: "Redeem your points",
+                    subtitle: "Earn & redeem points",
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const RewardsDashboardScreen(),
-                        ),
+                            builder: (_) => const RewardsDashboardScreen()),
                       );
                     },
                   ),
                   _buildDashboardCard(
                     icon: Icons.people,
                     title: "Employees",
-                    subtitle: "Manage staff",
+                    subtitle: "Manage your staff",
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const EmployeeListScreen(),
-                        ),
+                            builder: (_) => const EmployeeListScreen()),
                       );
                     },
                   ),
-                  // ✅ NEW MAP CARD
                   _buildDashboardCard(
-                    icon: Icons.map_outlined,
-                    title: "Pickup Map",
-                    subtitle: "View pickup locations",
+                    icon: Icons.subscriptions,
+                    title: "Subscription",
+                    subtitle: "View plan details",
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const PickupMapScreen(),
-                        ),
+                            builder: (_) => const MySubscriptionScreen()),
                       );
                     },
                   ),
                 ],
               ),
 
-              const SizedBox(height: 40),
-
+              const SizedBox(height: 35),
               const Center(
                 child: Text(
-                  "D.A.R.W.C.O.S",
+                  "D.A.R.W.C.O.S – Restaurant Mode",
                   style: TextStyle(
                     color: darwcosGreen,
                     fontWeight: FontWeight.bold,
@@ -278,51 +357,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildDashboardCard({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Card(
-        elevation: 3,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(
-                radius: 30,
-                backgroundColor: Colors.green.withOpacity(0.1),
-                child: Icon(icon, size: 32, color: darwcosGreen),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                style: const TextStyle(color: Colors.black54, fontSize: 13),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ---------- Drawer ----------
-  Drawer _buildAppDrawer() {
-    const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
+  // ---------------- DRAWER ----------------
+  Drawer _buildDrawer() {
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
@@ -330,56 +366,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
           UserAccountsDrawerHeader(
             decoration: const BoxDecoration(color: darwcosGreen),
             accountName: Text(
-              _restaurantName.isEmpty ? "Your Restaurant" : _restaurantName,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              "Welcome, $_restaurantName!",
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white,
+              ),
             ),
-            accountEmail: Text("$_points points"),
+            accountEmail: Text(
+              _username.isNotEmpty ? _username : "Owner Account",
+              style: const TextStyle(color: Colors.white70),
+            ),
             currentAccountPicture: const CircleAvatar(
               backgroundColor: Colors.white,
-              child: Icon(Icons.restaurant, color: darwcosGreen, size: 36),
+              child: Icon(Icons.store, color: darwcosGreen, size: 36),
             ),
           ),
           ListTile(
             leading: const Icon(Icons.dashboard),
             title: const Text('Dashboard'),
             onTap: () {
-              setState(() => _selectedIndex = 0);
               Navigator.pop(context);
+              setState(() => _selectedIndex = 0);
             },
           ),
           ListTile(
-            leading: const Icon(Icons.schedule),
+            leading: const Icon(Icons.delete_outline),
             title: const Text('Trash Pickups'),
             onTap: () {
-              setState(() => _selectedIndex = 1);
               Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const TrashPickupListScreen()),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.card_giftcard),
             title: const Text('Rewards'),
             onTap: () {
-              setState(() => _selectedIndex = 2);
               Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const RewardsDashboardScreen()),
+              );
             },
           ),
           ListTile(
             leading: const Icon(Icons.people),
             title: const Text('Employees'),
             onTap: () {
-              setState(() => _selectedIndex = 3);
               Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const EmployeeListScreen()),
+              );
             },
           ),
-          // ✅ ADD MAP LINK
+          const Divider(),
           ListTile(
-            leading: const Icon(Icons.map_outlined),
-            title: const Text('Pickup Map'),
+            leading: const Icon(Icons.subscriptions),
+            title: const Text('Subscription'),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const PickupMapScreen()),
+                MaterialPageRoute(
+                    builder: (_) => const MySubscriptionScreen()),
               );
             },
           ),
@@ -387,52 +443,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text('Logout'),
-            onTap: _onLogout,
+            onTap: _logout,
           ),
         ],
       ),
     );
   }
 
-  // ---------- Bottom Navigation ----------
-  Widget _getSelectedScreen() {
-    switch (_selectedIndex) {
-      case 0:
-        return _buildDashboardView();
-      case 1:
-        return const TrashPickupListScreen();
-      case 2:
-        return const RewardsDashboardScreen();
-      case 3:
-        return const EmployeeListScreen();
-      default:
-        return _buildDashboardView();
-    }
-  }
-
-  void _onItemTapped(int index) {
-    setState(() => _selectedIndex = index);
-  }
-
+  // ---------------- MAIN BUILD ----------------
   @override
   Widget build(BuildContext context) {
-    const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Colors.grey[100],
-      drawer: _buildAppDrawer(),
-      body: _getSelectedScreen(),
+      drawer: _buildDrawer(),
+      body: _buildDashboardView(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
         selectedItemColor: darwcosGreen,
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
+        onTap: (index) => setState(() => _selectedIndex = index),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: "Dashboard"),
-          BottomNavigationBarItem(icon: Icon(Icons.schedule), label: "Pickups"),
+          BottomNavigationBarItem(icon: Icon(Icons.delete_outline), label: "Pickups"),
           BottomNavigationBarItem(icon: Icon(Icons.card_giftcard), label: "Rewards"),
           BottomNavigationBarItem(icon: Icon(Icons.people), label: "Employees"),
+          BottomNavigationBarItem(icon: Icon(Icons.subscriptions), label: "Plans"),
         ],
       ),
     );

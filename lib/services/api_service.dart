@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
+
 
 class ApiService {
   // ---------------- BASE URL ----------------
@@ -12,34 +14,41 @@ class ApiService {
   // ---------------- AUTHENTICATION ----------------------------
   // ============================================================
 
-  static Future<bool> register(
-    String username,
-    String password, {
-    String? email,
-    required String restaurantName,
-  }) async {
-    final body = {
-      "username": username,
-      "password": password,
-      "restaurant_name": restaurantName,
-    };
-    if (email != null && email.isNotEmpty) body["email"] = email;
+ // ✅ Updated register() method with latitude and longitude support
+static Future<bool> register(
+  String username,
+  String password, {
+  String? email,
+  required String restaurantName,
+  double? latitude,
+  double? longitude,
+}) async {
+  final body = {
+    "username": username,
+    "password": password,
+    "restaurant_name": restaurantName,
+    "latitude": latitude,
+    "longitude": longitude,
+  };
 
-    final response = await http.post(
-      Uri.parse("${baseApiUrl}employees/register/"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode(body),
-    );
-
-    if (response.statusCode == 201) {
-      print("✅ Registered successfully: $username");
-      return true;
-    } else {
-      print("❌ Register failed (${response.statusCode}): ${response.body}");
-      return false;
-    }
+  if (email != null && email.isNotEmpty) {
+    body["email"] = email;
   }
 
+  final response = await http.post(
+    Uri.parse("${baseApiUrl}employees/register/"),
+    headers: {"Content-Type": "application/json"},
+    body: jsonEncode(body),
+  );
+
+  if (response.statusCode == 201) {
+    print("✅ Registered successfully with location: $latitude, $longitude");
+    return true;
+  } else {
+    print("❌ Registration failed: ${response.statusCode} - ${response.body}");
+    return false;
+  }
+}
   static Future<bool> registerDriver(
     String username,
     String password, {
@@ -63,7 +72,8 @@ class ApiService {
     }
   }
 
-  static Future<bool> login(String username, String password) async {
+static Future<bool> login(String username, String password) async {
+  try {
     final response = await http.post(
       Uri.parse("${baseApiUrl}token/"),
       headers: {"Content-Type": "application/json"},
@@ -77,7 +87,7 @@ class ApiService {
       await prefs.setString("access", data["access"]);
       await prefs.setString("refresh", data["refresh"]);
 
-      // Fetch user info
+      // 🔹 Now fetch the current user info immediately
       final userResponse = await http.get(
         Uri.parse("${baseApiUrl}employees/me/"),
         headers: {"Authorization": "Bearer ${data["access"]}"},
@@ -85,22 +95,29 @@ class ApiService {
 
       if (userResponse.statusCode == 200) {
         final userData = jsonDecode(userResponse.body);
-        final role = (userData["role"] ?? "unknown").toString().toLowerCase();
+
+        final role = (userData["role"] ?? "owner").toString().toLowerCase();
 
         await prefs.setString("role", role);
         await prefs.setString("username", userData["username"] ?? "");
-        await prefs.setString("restaurant_name", userData["restaurant_name"] ?? "");
-        print("✅ Login success ($role) - ${userData["username"]}");
+        await prefs.setString(
+            "restaurant_name", userData["restaurant_name"] ?? "");
+
+        print("✅ Login successful — Role: $role, Username: ${userData["username"]}");
+        return true;
       } else {
         print("⚠️ Login succeeded but failed fetching user info");
+        return false;
       }
-      return true;
     } else {
       print("❌ Login failed (${response.statusCode}): ${response.body}");
       return false;
     }
+  } catch (e) {
+    print("❌ Login exception: $e");
+    return false;
   }
-
+}
   static Future<bool> refreshToken() async {
     final prefs = await SharedPreferences.getInstance();
     final refresh = prefs.getString("refresh");
@@ -203,22 +220,39 @@ class ApiService {
   // ---------------- USER INFO ---------------------------------
   // ============================================================
 
-  static Future<Map<String, dynamic>?> getCurrentUser() async {
-    final response = await _retryRequest(() async {
-      return http.get(
-        Uri.parse("${baseApiUrl}employees/me/"),
-        headers: await _getHeaders(),
-      );
-    });
+static Future<Map<String, dynamic>?> getCurrentUser() async {
+  final prefs = await SharedPreferences.getInstance();
+  final token = prefs.getString("access");
 
-    if (response.statusCode == 200) {
-      print("✅ User info fetched successfully");
-      return jsonDecode(response.body);
-    } else {
-      print("❌ Failed to fetch user info (${response.statusCode})");
-      return null;
-    }
+  if (token == null) {
+    print("⚠️ No access token found — user not logged in.");
+    return null;
   }
+
+  final response = await _retryRequest(() async {
+    return http.get(
+      Uri.parse("${baseApiUrl}employees/me/"),
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
+    );
+  });
+
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body);
+    final role = (data["role"] ?? "owner").toString().toLowerCase();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString("role", role);
+
+    print("✅ Current user info fetched — Role: $role");
+    return data;
+  } else {
+    print("❌ Failed to fetch current user (${response.statusCode}): ${response.body}");
+    return null;
+  }
+}
 
    // ============================================================
   // ---------------- EMPLOYEES CRUD ----------------------------
@@ -448,29 +482,163 @@ class ApiService {
       );
     });
     return response.statusCode == 200 ? jsonDecode(response.body) : [];
+
   }
 
+    /// Redeem a reward (voucher or item) through backend
+    static Future<Map<String, dynamic>?> redeemReward({
+      required String rewardName,
+      required int cost,
+      required String rewardType,
+    }) async {
+      final response = await _retryRequest(() async {
+        return http.post(
+          Uri.parse("${baseApiUrl}rewards/redeem/"),
+          headers: await _getHeaders(),
+          body: jsonEncode({
+            "reward_name": rewardName,
+            "cost": cost,
+            "reward_type": rewardType,
+          }),
+        );
+      });
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        try {
+          return jsonDecode(response.body);
+        } catch (_) {
+          throw Exception("Failed to redeem reward (${response.statusCode})");
+        }
+      }
+    }
+    
   // ============================================================
-  // ---------------- TRASH PICKUPS -----------------------------
+  // ---------------- MY REWARDS (REDEEMED LIST) ----------------
   // ============================================================
 
-  static Future<List<dynamic>> getTrashPickups() async {
+  static Future<List<dynamic>> getMyRewards() async {
     final response = await _retryRequest(() async {
       return http.get(
-        Uri.parse("${baseApiUrl}trash_pickups/"),
+        Uri.parse("${baseApiUrl}rewards/my/"),
         headers: await _getHeaders(),
       );
     });
 
     if (response.statusCode == 200) {
-      print("✅ Trash pickups fetched successfully");
-      return jsonDecode(response.body);
+      final data = jsonDecode(response.body);
+      print("✅ My Rewards fetched successfully (${data.length})");
+      return data;
+    } else if (response.statusCode == 204) {
+      print("⚠️ No rewards redeemed yet.");
+      return [];
     } else {
-      print("❌ Failed to fetch pickups: ${response.statusCode}");
+      print("❌ Failed to fetch My Rewards: ${response.statusCode} - ${response.body}");
       return [];
     }
   }
 
+
+
+  // ============================================================
+  // ---------------- AVAILABLE VOUCHERS -------------------------
+  // ============================================================
+
+  static Future<List<dynamic>> getAvailableVouchers() async {
+    final response = await _retryRequest(() async {
+      return http.get(
+        Uri.parse("${baseApiUrl}rewards/vouchers/"),
+        headers: await _getHeaders(),
+      );
+    });
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      print("✅ Available vouchers fetched: ${data.length}");
+      return data;
+    } else {
+      print("❌ Failed to fetch vouchers: ${response.statusCode} - ${response.body}");
+      return [];
+    }
+  }
+
+  // ============================================================
+  // ---------------- GET PICKUP DETAIL --------------------------
+  // ============================================================
+
+  static Future<Map<String, dynamic>> getPickupDetail(int id) async {
+    final response = await _retryRequest(() async {
+      return http.get(
+        Uri.parse("${baseApiUrl}trash_pickups/$id/"),
+        headers: await _getHeaders(),
+      );
+    });
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      print("✅ Pickup details loaded for ID $id");
+      return data;
+    } else {
+      print("❌ Failed to fetch pickup details: ${response.statusCode} - ${response.body}");
+      throw Exception("Failed to fetch pickup detail");
+    }
+  }
+
+
+  // ============================================================
+  // ---------------- TRASH PICKUPS -----------------------------
+  // ============================================================
+
+  /// 🏢 For restaurant/owner — fetch pickups they created
+  static Future<List<dynamic>> getMyTrashPickups({bool includeHistory = false}) async {
+    final response = await _retryRequest(() async {
+      final uri = includeHistory
+          ? Uri.parse("${baseApiUrl}trash_pickups/mine/?include_history=1")
+          : Uri.parse("${baseApiUrl}trash_pickups/mine/");
+      return http.get(uri, headers: await _getHeaders());
+    });
+
+    if (response.statusCode == 200) {
+      print("✅ My (owner) pickups fetched successfully");
+      return jsonDecode(response.body);
+    } else {
+      print("❌ Failed to fetch my pickups: ${response.statusCode} - ${response.body}");
+      return [];
+    }
+  }
+
+  /// 🚚 For drivers — fetch pickups assigned to them
+  static Future<List<dynamic>> getDriverPickups({bool includeHistory = false}) async {
+    final response = await _retryRequest(() async {
+      final uri = includeHistory
+          ? Uri.parse("${baseApiUrl}trash_pickups/assigned/?include_history=1")
+          : Uri.parse("${baseApiUrl}trash_pickups/assigned/");
+      return http.get(uri, headers: await _getHeaders());
+    });
+
+    if (response.statusCode == 200) {
+      print("✅ Driver pickups fetched successfully");
+      return jsonDecode(response.body);
+    } else {
+      print("❌ Failed to fetch driver pickups: ${response.statusCode} - ${response.body}");
+      return [];
+    }
+  }
+
+  /// 🆕 Unified method (optional) — decides automatically based on stored role
+  static Future<List<dynamic>> getTrashPickupsAuto() async {
+    final prefs = await SharedPreferences.getInstance();
+    final role = prefs.getString("role") ?? "owner";
+
+    if (role == "driver") {
+      return await getDriverPickups();
+    } else {
+      return await getMyTrashPickups();
+    }
+  }
+
+  // ✅ Add new pickup request (used by owners)
   static Future<bool> addTrashPickup(Map<String, dynamic> body) async {
     final response = await _retryRequest(() async {
       return http.post(
@@ -480,10 +648,13 @@ class ApiService {
       );
     });
 
-    print(response.statusCode == 201
-        ? "✅ Pickup added successfully"
-        : "❌ Failed to add pickup: ${response.statusCode}");
-    return response.statusCode == 201;
+    if (response.statusCode == 201) {
+      print("✅ Pickup added successfully");
+      return true;
+    } else {
+      print("❌ Failed to add pickup: ${response.statusCode} - ${response.body}");
+      return false;
+    }
   }
 
   static Future<bool> updateTrashPickup(int id, Map<String, dynamic> body) async {
@@ -495,10 +666,13 @@ class ApiService {
       );
     });
 
-    print(response.statusCode == 200
-        ? "✅ Pickup updated"
-        : "❌ Failed to update pickup: ${response.statusCode}");
-    return response.statusCode == 200;
+    if (response.statusCode == 200) {
+      print("✅ Pickup updated successfully");
+      return true;
+    } else {
+      print("❌ Failed to update pickup: ${response.statusCode} - ${response.body}");
+      return false;
+    }
   }
 
   static Future<bool> deleteTrashPickup(int id) async {
@@ -506,29 +680,15 @@ class ApiService {
       return http.delete(
         Uri.parse("${baseApiUrl}trash_pickups/$id/"),
         headers: await _getHeaders(),
-      );  
-    });
-
-    print(response.statusCode == 204
-        ? "✅ Pickup deleted"
-        : "❌ Failed to delete pickup: ${response.statusCode}");
-    return response.statusCode == 204;
-  }
-
-  static Future<Map<String, dynamic>> cancelPickup(int id) async {
-    final response = await _retryRequest(() async {
-      return http.post(
-        Uri.parse("${baseApiUrl}trash_pickups/$id/cancel/"),
-        headers: await _getHeaders(),
       );
     });
 
-    if (response.statusCode == 200) {
-      print("✅ Pickup cancelled successfully");
-      return jsonDecode(response.body);
+    if (response.statusCode == 204) {
+      print("✅ Pickup deleted successfully");
+      return true;
     } else {
-      print("❌ Failed to cancel pickup: ${response.statusCode}");
-      throw Exception("Failed to cancel pickup");
+      print("❌ Failed to delete pickup: ${response.statusCode} - ${response.body}");
+      return false;
     }
   }
   
@@ -594,28 +754,44 @@ class ApiService {
     }
   }
 
-  
-
-    // ============================================================
-  // ---------------- DRIVER PICKUPS ----------------------------
-  // ============================================================
-
-  /// Fetch pickups assigned to the logged-in driver.
-  /// If [includeHistory] is true, both completed and cancelled pickups are returned.
-  static Future<List<dynamic>> getDriverPickups({bool includeHistory = false}) async {
+  /// ❌ Cancel a pickup (used by restaurant users)
+  static Future<Map<String, dynamic>> cancelPickup(int id) async {
     final response = await _retryRequest(() async {
-      final uri = includeHistory
-          ? Uri.parse("${baseApiUrl}drivers/pickups/?include_history=true")
-          : Uri.parse("${baseApiUrl}drivers/pickups/");
-      return http.get(uri, headers: await _getHeaders());
+      return http.post(
+        Uri.parse("${baseApiUrl}trash_pickups/$id/cancel/"),
+        headers: await _getHeaders(),
+      );
     });
 
     if (response.statusCode == 200) {
-      print("✅ Driver pickups fetched successfully");
+      print("✅ Pickup cancelled successfully (ID: $id)");
       return jsonDecode(response.body);
     } else {
-      print("❌ Failed to fetch driver pickups: ${response.statusCode} - ${response.body}");
-      return [];
+      print("❌ Failed to cancel pickup: ${response.statusCode} - ${response.body}");
+      throw Exception("Failed to cancel pickup");
+    }
+  }
+
+    // ============================================================
+  // ---------------- APPLY VOUCHER TO PICKUP -------------------
+  // ============================================================
+
+  static Future<Map<String, dynamic>> applyVoucherToPickup(
+      int pickupId, int voucherId) async {
+    final response = await _retryRequest(() async {
+      return http.post(
+        Uri.parse("${baseApiUrl}trash_pickups/$pickupId/apply_voucher/"),
+        headers: await _getHeaders(),
+        body: jsonEncode({"voucher_id": voucherId}),
+      );
+    });
+
+    if (response.statusCode == 200) {
+      print("✅ Voucher applied successfully to pickup $pickupId");
+      return jsonDecode(response.body);
+    } else {
+      print("❌ Failed to apply voucher (${response.statusCode}): ${response.body}");
+      throw Exception("Failed to apply voucher");
     }
   }
 
@@ -626,8 +802,9 @@ class ApiService {
   /// Fetch all pickups that are currently unassigned and available for drivers to claim.
   static Future<List<dynamic>> getAvailablePickups() async {
     final response = await _retryRequest(() async {
+      // ✅ Corrected route
       return http.get(
-        Uri.parse("${baseApiUrl}drivers/pickups/available/"),
+        Uri.parse("${baseApiUrl}trash_pickups/available/"),
         headers: await _getHeaders(),
       );
     });
@@ -644,8 +821,9 @@ class ApiService {
   /// Claim a specific pickup (assign it to the logged-in driver)
   static Future<Map<String, dynamic>> claimPickup(int id) async {
     final response = await _retryRequest(() async {
+      // ✅ Corrected route
       return http.post(
-        Uri.parse("${baseApiUrl}drivers/pickups/$id/claim/"),
+        Uri.parse("${baseApiUrl}trash_pickups/$id/claim/"),
         headers: await _getHeaders(),
       );
     });
@@ -659,6 +837,135 @@ class ApiService {
     }
   }
 
+// ============================================================
+// ---------------- SUBSCRIPTION SYSTEM -----------------------
+// ============================================================
 
+  static Future<List<dynamic>> getSubscriptionPlans() async {
+    final response = await _retryRequest(() async {
+      return http.get(
+        Uri.parse("${baseApiUrl}plans/"),
+        headers: await _getHeaders(),
+      );
+    });
+
+    if (response.statusCode == 200) {
+      print("✅ Subscription plans fetched successfully");
+      return jsonDecode(response.body);
+    } else {
+      print("❌ Failed to fetch subscription plans: ${response.statusCode} - ${response.body}");
+      return [];
+    }
+  }
+
+ static Future<Map<String, dynamic>?> getMySubscription() async {
+  final response = await _retryRequest(() async {
+    return http.get(
+      Uri.parse("${baseApiUrl}user-subscriptions/"),
+      headers: await _getHeaders(),
+    );
+  });
+
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body);
+
+    // Handle both single object and list responses
+    if (data is List && data.isNotEmpty) {
+      // Get the most recent or first subscription
+      final latestSub = data.last; // use .first if sorted newest-first
+      print("✅ Subscription found: $latestSub");
+      return latestSub;
+    } else if (data is Map<String, dynamic>) {
+      print("✅ Single subscription found: $data");
+      return data;
+    } else {
+      print("⚠️ No subscription data available");
+    }
+  } else {
+    print("❌ Failed to fetch subscription: ${response.statusCode} - ${response.body}");
+  }
+
+  return null;
+}
+  static Future<bool> createSubscription(int planId) async {
+    final response = await _retryRequest(() async {
+      return http.post(
+        Uri.parse("${baseApiUrl}subscriptions/"),
+        headers: await _getHeaders(),
+        body: jsonEncode({"plan": planId}),
+      );
+    });
+
+    if (response.statusCode == 201) {
+      print("✅ Subscription created successfully");
+      return true;
+    } else {
+      print("❌ Failed to create subscription: ${response.statusCode} - ${response.body}");
+      return false;
+    }
+  }
+
+  static Future<bool> createSubscriptionPayment({
+    required int planId,
+    required double amount,
+    required String method,
+    String? referenceNo,
+  }) async {
+    final body = {
+      "plan": planId,
+      "amount": amount,
+      "method": method,
+    };
+    if (referenceNo != null && referenceNo.isNotEmpty) body["reference_no"] = referenceNo;
+
+    final response = await _retryRequest(() async {
+      return http.post(
+        Uri.parse("${baseApiUrl}subscription-payments/"),
+        headers: await _getHeaders(),
+        body: jsonEncode(body),
+      );
+    });
+
+    if (response.statusCode == 201) {
+      print("✅ Subscription payment recorded successfully");
+      return true;
+    } else {
+      print("❌ Failed to record payment: ${response.statusCode} - ${response.body}");
+      return false;
+    }
+  }
+
+  // ============================================================
+// 🗑️ FETCH TRASH PICKUPS FOR CURRENT USER (OWNER)
+// ============================================================
+static Future<List<dynamic>> getUserPickups() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString("access");
+
+    if (token == null) return [];
+
+    final response = await http.get(
+      Uri.parse("${baseApiUrl}trash-pickups/"),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data is List) return data;
+      return [];
+    } else {
+      debugPrint(
+          "getUserPickups failed: ${response.statusCode} - ${response.body}");
+      return [];
+    }
+  } catch (e) {
+    debugPrint("getUserPickups error: $e");
+    return [];
+  }
+}
 }
 

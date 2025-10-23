@@ -13,6 +13,7 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
   static const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
   int _points = 0;
   bool _loading = true;
+  bool _loadingMyRewards = false;
 
   late AnimationController _glowController;
   late Animation<double> _glowAnimation;
@@ -22,6 +23,8 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
   String _nextBadge = "Bronze Collector";
   double _progress = 0.0;
   int _pointsToNext = 0;
+
+  List<Map<String, dynamic>> _myRewards = [];
 
   @override
   void initState() {
@@ -33,6 +36,7 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
     _glowAnimation =
         Tween<double>(begin: 0.0, end: 15.0).animate(_glowController);
     _fetchPoints();
+    _fetchMyRewards();
   }
 
   @override
@@ -46,16 +50,30 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
     final newPoints = await ApiService.getUserPoints();
     if (!mounted) return;
 
-    if (newPoints > _points && !_isGlowing) {
-      _startGlowEffect();
-    }
-
+    if (newPoints > _points && !_isGlowing) _startGlowEffect();
     _updateBadgeProgress(newPoints);
 
     setState(() {
       _points = newPoints;
       _loading = false;
     });
+  }
+
+  Future<void> _fetchMyRewards() async {
+    setState(() => _loadingMyRewards = true);
+    try {
+      final data = await ApiService.getMyRewards();
+      if (!mounted) return;
+      setState(() {
+        _myRewards = List<Map<String, dynamic>>.from(data ?? []);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Failed to load rewards: $e")));
+    } finally {
+      setState(() => _loadingMyRewards = false);
+    }
   }
 
   void _startGlowEffect() async {
@@ -67,7 +85,6 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
     setState(() => _isGlowing = false);
   }
 
-  // ---------- 🏅 Determine badge tier based on points ----------
   void _updateBadgeProgress(int pts) {
     int previous = 0;
     int next = 100;
@@ -103,11 +120,89 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
     });
   }
 
-  // ---------- Reward Card ----------
+  Future<void> _redeemReward(String name, int cost, bool isVoucher) async {
+    if (_points < cost) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("❌ Not enough points to redeem this reward."),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Confirm Redemption"),
+        content: Text("Redeem '$name' for $cost points?"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: darwcosGreen),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Confirm"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final result = await ApiService.redeemReward(
+        rewardName: name,
+        cost: cost,
+        rewardType: isVoucher ? "voucher" : "item",
+      );
+
+      if (result != null && result["success"] == true) {
+        setState(() {
+          _points = result["remaining_points"] ?? _points;
+        });
+        _showResultDialog(
+          title: isVoucher ? "🎉 Voucher Redeemed!" : "📦 Item Redeemed!",
+          message: result["message"] ?? "You’ve redeemed '$name'!",
+        );
+        _fetchMyRewards();
+        _updateBadgeProgress(_points);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result?["detail"] ?? "Redemption failed.")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
+  void _showResultDialog({required String title, required String message}) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(title, style: const TextStyle(color: darwcosGreen)),
+        content: Text(message, style: const TextStyle(fontSize: 15)),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: darwcosGreen),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRewardCard({
     required String name,
     required String image,
     required int points,
+    required bool isVoucher,
   }) {
     return Card(
       elevation: 3,
@@ -119,34 +214,19 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.asset(
-                image,
-                height: 60,
-                width: 60,
-                fit: BoxFit.cover,
-              ),
+              child:
+                  Image.asset(image, height: 60, width: 60, fit: BoxFit.cover),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "$points pts",
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Colors.black54,
-                    ),
-                  ),
+                  Text(name,
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w600)),
+                  Text("$points pts",
+                      style: const TextStyle(color: Colors.black54)),
                 ],
               ),
             ),
@@ -155,23 +235,10 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
                 backgroundColor: darwcosGreen,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
               ),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Redeemed $name")),
-                );
-              },
-              child: const Text(
-                "Redeem",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
+              onPressed: () => _redeemReward(name, points, isVoucher),
+              child: const Text("Redeem",
+                  style: TextStyle(color: Colors.white, fontSize: 12)),
             ),
           ],
         ),
@@ -179,137 +246,45 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
     );
   }
 
-  // ---------- Badge Card ----------
-  Widget _buildBadgeCard() {
-    return AnimatedBuilder(
-      animation: _glowAnimation,
-      builder: (context, child) {
-        return Container(
-          decoration: BoxDecoration(
-            boxShadow: _isGlowing
-                ? [
-                    BoxShadow(
-                      color: darwcosGreen.withOpacity(0.4),
-                      blurRadius: _glowAnimation.value,
-                      spreadRadius: _glowAnimation.value / 3,
-                    ),
-                  ]
-                : [],
-          ),
-          child: SizedBox(
-            height: 190,
-            child: Card(
-              elevation: 5,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    Container(
-                      height: 70,
-                      width: 70,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(50),
-                        border: Border.all(
-                          color: darwcosGreen.withOpacity(0.3),
-                          width: 2,
-                        ),
-                      ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          "assets/images/first_trash_badge.png",
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Row(
-                            children: [
-                              const Text(
-                                "Current Badge: ",
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: darwcosGreen,
-                                ),
-                              ),
-                              Text(
-                                _currentBadge,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "Next: $_nextBadge",
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text("See more badges soon!"),
-                                ),
-                              );
-                            },
-                            child: const Text(
-                              "see more →",
-                              style: TextStyle(
-                                color: darwcosGreen,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+  Widget _buildMyRewardCard(Map<String, dynamic> reward) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        leading: const Icon(Icons.card_giftcard, color: darwcosGreen),
+        title: Text(reward["reward_name"] ?? "Unknown"),
+        subtitle: Text(
+            "Type: ${reward["reward_type"] ?? "unknown"} • Status: ${reward["status"] ?? "completed"}"),
+        trailing: Text(
+          "${reward["points"] ?? 0} pts",
+          style: const TextStyle(
+              fontWeight: FontWeight.bold, color: darwcosGreen),
+        ),
+      ),
     );
   }
 
-  // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    final rewards = [
+    final List<Map<String, dynamic>> rewards = [
       {
         "name": "₱50 Discount Voucher",
         "points": 50,
         "image": "assets/images/50_discount.png",
+        "isVoucher": true,
       },
       {
         "name": "Free Trash Bag",
         "points": 30,
         "image": "assets/images/trashbag.png",
+        "isVoucher": false,
       },
       {
         "name": "₱100 Discount Voucher",
         "points": 100,
         "image": "assets/images/100_discount.png",
+        "isVoucher": true,
       },
-
     ];
 
     return Scaffold(
@@ -331,129 +306,173 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen>
       body: Stack(
         children: [
           Container(height: 180, width: double.infinity, color: darwcosGreen),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 20),
-
-              // 🟩 My Points + 🏅 Badge
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // My Points Card
-                      Expanded(
-                        flex: 2,
-                        child: Card(
-                          elevation: 6,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 24, horizontal: 24),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text(
-                                      "My Points",
-                                      style: TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: darwcosGreen,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      onPressed: _fetchPoints,
-                                      icon: const Icon(Icons.refresh,
-                                          color: darwcosGreen),
-                                    ),
-                                  ],
-                                ),
-                                Text(
-                                  _loading
-                                      ? "..."
-                                      : "${_points.toStringAsFixed(1)} pts",
-                                  style: const TextStyle(
-                                    fontSize: 40,
-                                    fontWeight: FontWeight.bold,
-                                    color: darwcosGreen,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                LinearProgressIndicator(
-                                  value: _progress,
-                                  backgroundColor: Colors.grey[200],
-                                  color: darwcosGreen,
-                                  minHeight: 6,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _points >= 1000
-                                      ? "🏆 Max badge achieved!"
-                                      : "$_pointsToNext pts to $_nextBadge",
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(flex: 1, child: _buildBadgeCard()),
-                    ],
+          RefreshIndicator(
+            onRefresh: () async {
+              await _fetchPoints();
+              await _fetchMyRewards();
+            },
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              children: [
+                _buildPointsAndBadgeSection(),
+                const SizedBox(height: 30),
+                const Text(
+                  "Redeem Rewards",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: darwcosGreen,
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 30),
-
-              // 🎁 Rewards Section
-              Expanded(
-                child: SingleChildScrollView(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Redeem Rewards",
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: darwcosGreen,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      Wrap(
-                        spacing: 16,
-                        runSpacing: 16,
-                        children: rewards.map((reward) {
-                          return SizedBox(
-                            width: 320,
-                            child: _buildRewardCard(
-                              name: reward["name"] as String,
-                              image: reward["image"] as String,
-                              points: reward["points"] as int,
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ],
+                const SizedBox(height: 16),
+                ...rewards.map((r) => _buildRewardCard(
+                      name: r["name"]!,
+                      image: r["image"]!,
+                      points: r["points"]!,
+                      isVoucher: r["isVoucher"]!,
+                    )),
+                const SizedBox(height: 30),
+                const Text(
+                  "My Rewards",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: darwcosGreen,
                   ),
                 ),
+                const SizedBox(height: 16),
+                if (_loadingMyRewards)
+                  const Center(child: CircularProgressIndicator())
+                else if (_myRewards.isEmpty)
+                  const Center(
+                      child: Text("You haven’t redeemed any rewards yet."))
+                else
+                  ..._myRewards.map((r) => _buildMyRewardCard(r)).toList(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPointsAndBadgeSection() {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Card(
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "My Points",
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: darwcosGreen,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _fetchPoints,
+                          icon: const Icon(Icons.refresh, color: darwcosGreen),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      _loading ? "..." : "$_points pts",
+                      style: const TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                        color: darwcosGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    LinearProgressIndicator(
+                      value: _progress,
+                      backgroundColor: Colors.grey[200],
+                      color: darwcosGreen,
+                      minHeight: 6,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _points >= 1000
+                          ? "🏆 Max badge achieved!"
+                          : "$_pointsToNext pts to $_nextBadge",
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            flex: 1,
+            child: AnimatedBuilder(
+              animation: _glowAnimation,
+              builder: (context, child) {
+                return Container(
+                  decoration: BoxDecoration(
+                    boxShadow: _isGlowing
+                        ? [
+                            BoxShadow(
+                              color: darwcosGreen.withOpacity(0.4),
+                              blurRadius: _glowAnimation.value,
+                              spreadRadius: _glowAnimation.value / 3,
+                            ),
+                          ]
+                        : [],
+                  ),
+                  child: Card(
+                    elevation: 5,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Image.asset(
+                            "assets/images/first_trash_badge.png",
+                            height: 60,
+                            width: 60,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _currentBadge,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "Next: $_nextBadge",
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.black54),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),

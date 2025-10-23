@@ -12,8 +12,11 @@ class PickupDetailScreen extends StatefulWidget {
 
 class _PickupDetailScreenState extends State<PickupDetailScreen> {
   static const Color darwcosGreen = Color.fromARGB(255, 1, 87, 4);
+
   late Map<String, dynamic> p;
   bool _busy = false;
+  bool _loadingVouchers = false;
+  List<dynamic> _availableVouchers = [];
 
   @override
   void initState() {
@@ -31,6 +34,15 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
     }
   }
 
+  Future<void> _refreshPickup() async {
+    try {
+      final refreshed = await ApiService.getPickupDetail(p["id"]);
+      setState(() => p = refreshed);
+    } catch (_) {
+      // ignore for now
+    }
+  }
+
   Future<void> _doCancel() async {
     setState(() => _busy = true);
     try {
@@ -43,6 +55,119 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Failed to cancel: $e")),
+      );
+    }
+    setState(() => _busy = false);
+  }
+
+  // 🔹 Load vouchers the user has redeemed but not yet used
+  Future<void> _loadAvailableVouchers() async {
+    setState(() => _loadingVouchers = true);
+    try {
+      final vouchers = await ApiService.getAvailableVouchers();
+      setState(() => _availableVouchers = vouchers);
+      _showVoucherDialog();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to load vouchers: $e")),
+      );
+    }
+    setState(() => _loadingVouchers = false);
+  }
+
+  // 🔹 Show list of vouchers to pick from
+  void _showVoucherDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        if (_availableVouchers.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Center(child: Text("No available vouchers found.")),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Select a Voucher to Apply",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: darwcosGreen,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ..._availableVouchers.map((v) {
+                final code = v["code"] ?? "Unnamed Voucher";
+                final discount = v["discount_amount"] ?? 0;
+                return ListTile(
+                  leading: const Icon(Icons.local_offer_outlined,
+                      color: darwcosGreen),
+                  title: Text(code),
+                  subtitle: Text("Discount: ₱$discount"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmApplyVoucher(v);
+                  },
+                );
+              }).toList(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // 🔹 Ask user to confirm applying voucher
+  void _confirmApplyVoucher(Map<String, dynamic> voucher) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Apply Voucher"),
+        content: Text(
+            "Apply voucher ${voucher["code"]} (₱${voucher["discount_amount"]}) to this pickup?"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: darwcosGreen),
+            onPressed: () {
+              Navigator.pop(context);
+              _applyVoucher(voucher);
+            },
+            child: const Text("Apply"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🔹 Actually apply selected voucher to pickup
+  Future<void> _applyVoucher(Map<String, dynamic> voucher) async {
+    setState(() => _busy = true);
+    try {
+      final response =
+          await ApiService.applyVoucherToPickup(p["id"], voucher["id"]);
+      setState(() => p = response);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Voucher ${voucher["code"]} applied successfully!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to apply voucher: $e")),
       );
     }
     setState(() => _busy = false);
@@ -81,6 +206,10 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
     final status = (p["status"] ?? "unknown").toString();
     final color = _statusColor(status);
 
+    final baseAmount = p["base_amount"] ?? 0;
+    final totalAmount = p["total_amount"] ?? baseAmount;
+    final discount = (p["voucher_discount"] ?? 0).toString();
+
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
@@ -97,16 +226,14 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
         ),
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          setState(() => p = widget.pickup);
-        },
+        onRefresh: _refreshPickup,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // 🟩 Header Card
+              // 🟩 Header
               Card(
                 elevation: 6,
                 shadowColor: darwcosGreen.withOpacity(0.2),
@@ -117,7 +244,6 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
                   child: Row(
                     children: [
-                      // Icon with background
                       Container(
                         height: 64,
                         width: 64,
@@ -128,7 +254,6 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
                         child: Icon(_statusIcon(status), color: color, size: 34),
                       ),
                       const SizedBox(width: 18),
-                      // Text content
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,68 +284,95 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
 
               const SizedBox(height: 20),
 
-              // 🌿 Detail Cards
+              // 🌿 Info cards
               _buildInfoCard(
-                icon: Icons.info_outline,
-                title: "Status",
-                value: status.toUpperCase(),
-                color: color,
-              ),
-              if (p["trash_weight"] != null)
-                _buildInfoCard(
+                  icon: Icons.info_outline,
+                  title: "Status",
+                  value: status.toUpperCase(),
+                  color: color),
+              _buildInfoCard(
                   icon: Icons.scale,
                   title: "Estimated Weight",
-                  value: "${p["trash_weight"]} kg",
-                ),
-              if (p["waste_type_display"] != null)
-                _buildInfoCard(
+                  value: "${p["trash_weight"]} kg"),
+              _buildInfoCard(
                   icon: Icons.delete_outline,
                   title: "Waste Type",
-                  value: p["waste_type_display"],
-                ),
-              if (p["driver_username"] != null)
-                _buildInfoCard(
+                  value: p["waste_type_display"] ?? ""),
+              _buildInfoCard(
                   icon: Icons.person_outline,
-                  title: "Assigned Driver",
-                  value: p["driver_username"] ?? "Unassigned",
+                  title: "Driver",
+                  value: p["driver_username"] ?? "Unassigned"),
+
+              // 💰 Billing section
+              _buildInfoCard(
+                icon: Icons.payments_outlined,
+                title: "Base Amount",
+                value: "₱$baseAmount",
+                color: darwcosGreen,
+              ),
+
+              if (p["voucher_code"] != null)
+                _buildInfoCard(
+                  icon: Icons.local_offer_outlined,
+                  title: "Voucher Applied",
+                  value: "${p["voucher_code"]} (-₱$discount)",
+                  color: Colors.purple,
                 ),
+
+              _buildInfoCard(
+                icon: Icons.attach_money,
+                title: "Total Amount",
+                value: "₱$totalAmount",
+                color: Colors.teal,
+              ),
+
+              const SizedBox(height: 15),
+
+              // 🎟️ Apply Voucher Button
+              if (status == "pending" && p["voucher_code"] == null)
+                (_loadingVouchers)
+                    ? const Padding(
+                        padding: EdgeInsets.all(12.0),
+                        child: CircularProgressIndicator(color: darwcosGreen),
+                      )
+                    : ElevatedButton.icon(
+                        icon: const Icon(Icons.local_offer_outlined),
+                        label: const Text("Apply Voucher"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: darwcosGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 30, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30)),
+                          textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        onPressed: _loadAvailableVouchers,
+                      ),
 
               const SizedBox(height: 25),
 
-              // 🔴 Cancel Button Section (only if not completed)
+              // ❌ Cancel Pickup
               if (!_busy &&
                   status != "completed" &&
                   status != "cancelled")
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Card(
-                    elevation: 5,
-                    shadowColor: Colors.redAccent.withOpacity(0.2),
+                OutlinedButton.icon(
+                  onPressed: _doCancel,
+                  icon: const Icon(Icons.close),
+                  label: const Text("Cancel Pickup"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: const BorderSide(color: Colors.redAccent, width: 1.5),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 30, vertical: 12),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30)),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12, horizontal: 16),
-                      child: Center(
-                        child: OutlinedButton.icon(
-                          onPressed: _doCancel,
-                          icon: const Icon(Icons.close),
-                          label: const Text("Cancel Pickup"),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.redAccent,
-                            side: const BorderSide(
-                                color: Colors.redAccent, width: 1.5),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 30, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(30)),
-                            textStyle: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -237,7 +389,7 @@ class _PickupDetailScreenState extends State<PickupDetailScreen> {
     );
   }
 
-  // 🌱 Helper widget for consistent card design
+  // 🌱 Info Card Builder
   Widget _buildInfoCard({
     required IconData icon,
     required String title,

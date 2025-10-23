@@ -15,7 +15,7 @@ class _RewardsRedeemScreenState extends State<RewardsRedeemScreen> {
   int _points = 0;
   bool _loading = true;
 
-  // Example rewards (you can later load this from API)
+  // Example rewards list
   final List<Map<String, dynamic>> rewards = [
     {"name": "₱50 Discount Voucher", "points": 50, "icon": Icons.local_offer},
     {"name": "Free Trash Bag", "points": 30, "icon": Icons.shopping_bag},
@@ -106,10 +106,51 @@ class _RewardsRedeemScreenState extends State<RewardsRedeemScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Successfully redeemed $name!")),
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text("Confirm Redemption"),
+                      content: Text("Redeem '$name' for $points points?"),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text("Cancel"),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text("Confirm"),
+                        ),
+                      ],
+                    ),
                   );
+
+                  if (confirm != true) return;
+
+                  try {
+                    // 🔹 Call backend redeem API
+                    await ApiService.redeemReward(
+                      rewardName: name,
+                      cost: points,
+                      rewardType: "voucher", // or "item", depending on your reward
+                    );
+
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("Successfully redeemed $name!")),
+                    );
+
+                    // 🔹 Refresh local points
+                    await _fetchPoints();
+
+                    // 🔹 Return to dashboard with success flag
+                    Navigator.pop(context, true);
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("Redemption failed: $e")),
+                    );
+                  }
                 },
               ),
             ),

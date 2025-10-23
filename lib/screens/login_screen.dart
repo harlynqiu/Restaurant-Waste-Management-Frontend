@@ -5,7 +5,7 @@ import '../services/api_service.dart';
 import 'signup_screen.dart';
 import 'dashboard.dart';
 import 'driver_dashboard.dart';
-import 'reset_confirm_screen.dart';
+import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,71 +18,61 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   // ---------------- LOGIN FUNCTION ----------------
   Future<void> _login() async {
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (username.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter both username and password.")),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
-
-    bool success = await ApiService.login(
-      _usernameController.text.trim(),
-      _passwordController.text.trim(),
-    );
-
+    final success = await ApiService.login(username, password);
     setState(() => _isLoading = false);
 
     if (!mounted) return;
 
-    if (success) {
-      try {
-        final user = await ApiService.getCurrentUser();
-        final prefs = await SharedPreferences.getInstance();
-
-        if (user != null) {
-          // Extract possible role fields safely
-          final role = (user["user_role"] ??
-                  user["role"] ??
-                  user["position"] ??
-                  "")
-              .toString()
-              .toLowerCase();
-
-          final groups = List<String>.from(user["groups"] ?? []);
-
-          // Save role in preferences
-          await prefs.setString("role", role);
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Login successful!")),
-          );
-
-          // ✅ Decide destination based on role or group name
-          final isDriver = role.contains("driver") ||
-              groups.any((g) => g.toLowerCase().contains("driver"));
-
-          if (isDriver) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const DriverDashboardScreen()),
-            );
-          } else {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const DashboardScreen()),
-            );
-          }
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to fetch user info.")),
-          );
-        }
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error fetching user info: $e")),
-        );
-      }
-    } else {
+    if (!success) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Invalid username or password.")),
+      );
+      return;
+    }
+
+    try {
+      // ✅ Fetch current user info from backend and preferences
+      final user = await ApiService.getCurrentUser();
+      final prefs = await SharedPreferences.getInstance();
+      final role = prefs.getString("role") ?? user?["role"] ?? "owner";
+
+      print("🔑 Logged in role: $role");
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("✅ Login successful as $role!")),
+      );
+
+      // ✅ Role-based navigation
+      Widget targetScreen;
+      if (role.toLowerCase() == "driver") {
+        targetScreen = const DriverDashboardScreen();
+      } else {
+        targetScreen = const DashboardScreen();
+      }
+
+      // ✅ Replace entire stack with dashboard
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => targetScreen),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("⚠️ Error fetching user info: $e")),
       );
     }
   }
@@ -138,8 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 32, horizontal: 24),
+                    padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -165,56 +154,51 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          "Let's continue in making the world a better place one step at a time.",
+                          "Let's continue making the world a better place one step at a time.",
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.black54),
                         ),
                         const SizedBox(height: 24),
 
-                        // Username
+                        // Username field
                         TextField(
                           controller: _usernameController,
                           decoration: const InputDecoration(
                             labelText: "Email or Username",
-                            labelStyle:
-                                TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
+                            labelStyle: TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
                             focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(
-                                  color: Color.fromARGB(255, 1, 87, 4),
-                                  width: 2),
+                              borderSide: BorderSide(color: Color.fromARGB(255, 1, 87, 4), width: 2),
                             ),
                             enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(
-                                  color: Color.fromARGB(255, 1, 87, 4),
-                                  width: 1),
+                              borderSide: BorderSide(color: Color.fromARGB(255, 1, 87, 4), width: 1),
                             ),
-                            prefixIcon: Icon(Icons.person,
-                                color: Color.fromARGB(255, 1, 87, 4)),
+                            prefixIcon: Icon(Icons.person, color: Color.fromARGB(255, 1, 87, 4)),
                           ),
                           cursorColor: const Color.fromARGB(255, 1, 87, 4),
                         ),
                         const SizedBox(height: 16),
 
-                        // Password
+                        // Password field
                         TextField(
                           controller: _passwordController,
-                          obscureText: true,
-                          decoration: const InputDecoration(
+                          obscureText: _obscurePassword,
+                          decoration: InputDecoration(
                             labelText: "Password",
-                            labelStyle:
-                                TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(
-                                  color: Color.fromARGB(255, 1, 87, 4),
-                                  width: 2),
+                            labelStyle: const TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
+                            focusedBorder: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Color.fromARGB(255, 1, 87, 4), width: 2),
                             ),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(
-                                  color: Color.fromARGB(255, 1, 87, 4),
-                                  width: 1),
+                            enabledBorder: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Color.fromARGB(255, 1, 87, 4), width: 1),
                             ),
-                            prefixIcon: Icon(Icons.lock,
-                                color: Color.fromARGB(255, 1, 87, 4)),
+                            prefixIcon: const Icon(Icons.lock, color: Color.fromARGB(255, 1, 87, 4)),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                                color: const Color.fromARGB(255, 1, 87, 4),
+                              ),
+                              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            ),
                           ),
                           cursorColor: const Color.fromARGB(255, 1, 87, 4),
                         ),
@@ -226,15 +210,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ForgotPasswordScreen(),
-                                ),
+                                MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
                               );
                             },
                             child: const Text(
                               "Forgot Password?",
-                              style: TextStyle(
-                                  color: Color.fromARGB(255, 1, 87, 4)),
+                              style: TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
                             ),
                           ),
                         ),
@@ -244,23 +225,19 @@ class _LoginScreenState extends State<LoginScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: _isLoading
-                              ? const Center(
-                                  child: CircularProgressIndicator())
+                              ? const Center(child: CircularProgressIndicator())
                               : ElevatedButton(
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        const Color.fromARGB(255, 1, 87, 4),
+                                    backgroundColor: const Color.fromARGB(255, 1, 87, 4),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 14),
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
                                   ),
                                   onPressed: _login,
                                   child: const Text(
                                     "Sign In",
-                                    style: TextStyle(
-                                        fontSize: 16, color: Colors.white),
+                                    style: TextStyle(fontSize: 16, color: Colors.white),
                                   ),
                                 ),
                         ),
@@ -282,13 +259,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         SizedBox(
                           width: 250,
                           child: OutlinedButton.icon(
-                            icon: const Icon(Icons.g_mobiledata,
-                                color: Color.fromARGB(255, 1, 87, 4)),
+                            icon: const Icon(Icons.g_mobiledata, color: Color.fromARGB(255, 1, 87, 4)),
                             onPressed: () {},
                             label: const Text(
                               "Sign in with Google",
-                              style: TextStyle(
-                                  color: Color.fromARGB(255, 1, 87, 4)),
+                              style: TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
                             ),
                           ),
                         ),
@@ -302,8 +277,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: () {},
                             label: const Text(
                               "Sign in with Apple",
-                              style: TextStyle(
-                                  color: Color.fromARGB(255, 1, 87, 4)),
+                              style: TextStyle(color: Color.fromARGB(255, 1, 87, 4)),
                             ),
                           ),
                         ),
@@ -318,13 +292,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed: () {
                                 Navigator.pushReplacement(
                                   context,
-                                  MaterialPageRoute(
-                                      builder: (_) => const SignupScreen()),
+                                  MaterialPageRoute(builder: (_) => const SignupScreen()),
                                 );
                               },
                               style: TextButton.styleFrom(
-                                foregroundColor:
-                                    const Color.fromARGB(255, 1, 87, 4),
+                                foregroundColor: const Color.fromARGB(255, 1, 87, 4),
                               ),
                               child: const Text(
                                 "Sign up",
@@ -344,135 +316,6 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({super.key});
-
-  @override
-  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
-}
-
-class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _uidController = TextEditingController();
-  final TextEditingController _tokenController = TextEditingController();
-  bool _loading = false;
-  bool _showManualConfirm = false;
-
-  void _resetPassword() async {
-    setState(() => _loading = true);
-    bool success = await ApiService.resetPassword(_emailController.text.trim());
-    setState(() => _loading = false);
-
-    if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Password reset link sent! Check your email.")),
-      );
-      setState(() => _showManualConfirm = true);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to send reset link. Try again.")),
-      );
-    }
-  }
-
-  void _openConfirm() {
-    final uid = _uidController.text.trim();
-    final token = _tokenController.text.trim();
-
-    if (uid.isEmpty || token.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter both UID and Token.")),
-      );
-      return;
-    }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ResetConfirmScreen(uid: uid, token: token),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-          title: const Text("Forgot Password"), backgroundColor: Colors.green),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              "Enter your registered email address. We'll send you a link to reset your password.",
-              style: TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(
-                labelText: "Email",
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 24),
-            _loading
-                ? const Center(child: CircularProgressIndicator())
-                : ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: _resetPassword,
-                    child: const Text(
-                      "Send Reset Link",
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                  ),
-            if (_showManualConfirm) ...[
-              const SizedBox(height: 32),
-              const Text(
-                "Manually test reset link by entering UID and Token:",
-                style: TextStyle(fontSize: 14, color: Colors.black54),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _uidController,
-                decoration: const InputDecoration(
-                  labelText: "UID",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _tokenController,
-                decoration: const InputDecoration(
-                  labelText: "Token",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: _openConfirm,
-                child: const Text(
-                  "Proceed to Reset Form",
-                  style: TextStyle(color: Colors.white, fontSize: 16),
-                ),
-              ),
-            ]
-          ],
-        ),
       ),
     );
   }

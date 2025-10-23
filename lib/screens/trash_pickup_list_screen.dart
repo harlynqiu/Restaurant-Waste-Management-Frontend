@@ -27,7 +27,7 @@ class _TrashPickupListScreenState extends State<TrashPickupListScreen> {
     setState(() => _isLoading = true);
     try {
       final pts = await ApiService.getUserPoints();
-      final list = await ApiService.getTrashPickups();
+      final list = await ApiService.getTrashPickupsAuto();
       setState(() {
         _points = pts;
         pickups = list;

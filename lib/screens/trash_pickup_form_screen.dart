@@ -1,3 +1,4 @@
+// lib/screens/trash_pickup_form_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
@@ -43,15 +44,44 @@ class _TrashPickupFormScreenState extends State<TrashPickupFormScreen> {
         text: widget.pickup?['trash_weight']?.toString() ?? "");
     _selectedWasteType = widget.pickup?['waste_type'];
     _fetchPoints();
+    _fetchUserAddress(); // ✅ Auto-fill restaurant address
   }
 
+  // ---------------- FETCH RESTAURANT ADDRESS ----------------
+  Future<void> _fetchUserAddress() async {
+    if (widget.pickup != null) return; // Don’t override on edit
+
+    try {
+      final user = await ApiService.getCurrentUser();
+      if (user != null) {
+        // Get the restaurant name and coordinates from the user
+        final restaurantName = user['restaurant_name'] ?? '';
+        final lat = user['latitude'];
+        final lng = user['longitude'];
+
+        setState(() {
+          _addressController.text = restaurantName.isNotEmpty
+              ? restaurantName
+              : "Restaurant Address";
+        });
+
+        if (lat != null && lng != null) {
+          debugPrint("📍 Restaurant coordinates: $lat, $lng");
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Failed to fetch user address: $e");
+    }
+  }
+
+  // ---------------- FETCH REWARD POINTS ----------------
   Future<void> _fetchPoints() async {
     final pts = await ApiService.getUserPoints();
     if (!mounted) return;
     setState(() => _points = pts);
   }
 
-  // ---------------- SUBMIT ----------------
+  // ---------------- SUBMIT PICKUP ----------------
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -67,7 +97,6 @@ class _TrashPickupFormScreenState extends State<TrashPickupFormScreen> {
             _selectedTime!.minute,
           );
 
-    // ✅ Send as a Map that matches ApiService.addTrashPickup / updateTrashPickup
     Map<String, dynamic> body = {
       "scheduled_date": finalDateTime.toIso8601String(),
       "trash_weight": double.parse(_weightController.text),
@@ -76,7 +105,6 @@ class _TrashPickupFormScreenState extends State<TrashPickupFormScreen> {
     };
 
     bool success;
-
     if (widget.pickup == null) {
       success = await ApiService.addTrashPickup(body);
     } else {
@@ -101,6 +129,7 @@ class _TrashPickupFormScreenState extends State<TrashPickupFormScreen> {
     }
   }
 
+  // ---------------- DATE/TIME PICKERS ----------------
   void _pickDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -227,10 +256,12 @@ class _TrashPickupFormScreenState extends State<TrashPickupFormScreen> {
                     children: [
                       TextFormField(
                         controller: _addressController,
+                        readOnly: true, // ✅ Make non-editable (auto-filled)
                         decoration: _clearFieldDecoration(
-                            label: "Address", icon: Icons.location_on),
+                            label: "Restaurant Address",
+                            icon: Icons.location_on),
                         validator: (v) =>
-                            v == null || v.isEmpty ? "Enter an address" : null,
+                            v == null || v.isEmpty ? "Address missing" : null,
                       ),
                       const SizedBox(height: 16),
                       TextFormField(

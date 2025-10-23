@@ -24,12 +24,19 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen> {
 
   Future<void> _fetchPoints() async {
     setState(() => _loading = true);
-    final pts = await ApiService.getUserPoints();
-    if (!mounted) return;
-    setState(() {
-      _points = pts;
-      _loading = false;
-    });
+    try {
+      final pts = await ApiService.getUserPoints();
+      if (!mounted) return;
+      setState(() {
+        _points = pts;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Failed to load points: $e")));
+    }
   }
 
   // ---------------- Reward Card ----------------
@@ -156,8 +163,7 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen> {
                       controller: _searchController,
                       decoration: InputDecoration(
                         hintText: "Search rewards...",
-                        prefixIcon:
-                            const Icon(Icons.search, color: Colors.grey),
+                        prefixIcon: const Icon(Icons.search, color: Colors.grey),
                         filled: true,
                         fillColor: Colors.grey[100],
                         contentPadding:
@@ -204,20 +210,28 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen> {
             children: [
               _buildPointsCard(),
               const SizedBox(height: 24),
+
+              // ✅ Redeem Rewards button — refresh after returning
               _buildRewardCard(
                 icon: Icons.card_giftcard,
                 iconColor: Colors.blue,
                 title: "Redeem Rewards",
                 subtitle: "Use your points to claim exciting offers.",
-                onTap: () {
-                  Navigator.push(
+                onTap: () async {
+                  final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => const RewardsRedeemScreen(),
                     ),
                   );
+
+                  // 🔄 Refresh points if redemption succeeded
+                  if (result == true) {
+                    _fetchPoints();
+                  }
                 },
               ),
+
               _buildRewardCard(
                 icon: Icons.history,
                 iconColor: Colors.orange,
@@ -227,6 +241,7 @@ class _RewardsDashboardScreenState extends State<RewardsDashboardScreen> {
                   // You can link your rewards history screen here
                 },
               ),
+
               const SizedBox(height: 50),
               Image.asset(
                 "assets/images/black_philippine_eagle.png",
